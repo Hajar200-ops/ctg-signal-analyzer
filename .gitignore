@@ -1,0 +1,18 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.streamlit/secrets.toml
+*.zip
+
+# CTG data and local files
+data/
+ctg_cardio/
+*.csv
+*.xlsx
+*.xls
+*.dat
+*.hea
+*.mat
