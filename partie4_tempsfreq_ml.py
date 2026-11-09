@@ -1,26 +1,10 @@
-"""PARTIE 4 — MEMBRE 4 : ondelettes (CWT), caractéristiques par fenêtres, fusion, détection d'anomalies.
-
-Signaux et Systèmes : transformée en ondelettes, énergie d'un signal, extraction de caractéristiques.
-Bonus : Isolation Forest (apprentissage automatique non supervisé).
-"""
+"""Temps-fréquence (ondelettes), caractéristiques par fenêtres, fenêtres inhabituelles."""
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from commun import COULEURS, bandeau_partie, layout, notions, plus_long_segment
-
-NOTIONS = r"""
-- **Transformée en ondelettes (CWT)** : $W(a,b) = \frac{1}{\sqrt a}\int x(t)\,\psi^*\!\left(\frac{t-b}{a}\right)dt$.
-  Comme la STFT, elle localise les fréquences dans le temps, mais la résolution **s'adapte** :
-  fines en temps pour les hautes fréquences, fines en fréquence pour les basses.
-- **Lien échelle-fréquence** : $f = \dfrac{f_c\, f_e}{a}$ ($f_c$ : fréquence centrale de l'ondelette de Morlet).
-- **Énergie centrée d'une fenêtre** : $E = \sum_n (x[n]-\bar x)^2$ — mesure l'agitation du signal autour de sa moyenne.
-- **Caractéristiques par fenêtres** : on résume le signal toutes les 30 s (moyenne, variance, énergie…)
-  pour obtenir un tableau exploitable par un algorithme.
-- **Isolation Forest** : repère les fenêtres **statistiquement rares** dans CET enregistrement.
-  Ce n'est pas un détecteur de pathologie.
-"""
+from commun import COULEURS, bandeau_partie, layout, plus_long_segment
 
 
 @st.cache_data(show_spinner=False)
@@ -50,9 +34,7 @@ def fenetres(t, x, fs, duree_s, valide, nom, unite=""):
 
 
 def afficher(ctx):
-    bandeau_partie(4, "Temps-fréquence, caractéristiques et anomalies", "Membre 4",
-                   "Ondelettes, résumé du signal par fenêtres de 30 s, fusion FHR/UC et repérage des fenêtres inhabituelles.")
-    notions("ondelettes, énergie, caractéristiques", NOTIONS)
+    bandeau_partie("🧸", "Temps-fréquence et fenêtres inhabituelles")
     _cwt_ui(ctx)
     fhr_df, uc_df, comb = _caracteristiques_ui(ctx)
     _anomalies_ui(ctx, comb)
@@ -75,12 +57,13 @@ def _cwt_ui(ctx):
         mag, f = _cwt(sig - sig.mean(), ctx.fs, fmin, fmax, 60)
     pas = max(1, mag.shape[1] // 1200)          # sous-échantillonnage pour l'AFFICHAGE seulement
     tt = (ctx.t[a:b] / 60)[::pas]
-    fig = go.Figure(go.Heatmap(x=tt, y=f, z=mag[:, ::pas], colorscale="Viridis", colorbar=dict(title="Amplitude")))
-    fig.update_yaxes(title_text="Fréquence (Hz)", type="log")
+    z = mag[:, ::pas]
+    fig = go.Figure(go.Heatmap(x=tt, y=f, z=z, colorscale="Viridis", zmin=0, zmax=float(np.percentile(z, 99)),
+                               colorbar=dict(title="Amplitude")))
+    reperes = [v for v in (0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 1.5) if f.min() * 0.99 <= v <= f.max() * 1.01]
+    fig.update_yaxes(title_text="Fréquence (Hz)", type="log", tickvals=reperes, ticktext=[f"{v:g}" for v in reperes])
     fig.update_xaxes(title_text="Temps (min)")
     st.plotly_chart(layout(fig, "Scalogramme du FHR (CWT)", 420, hover="closest"), width="stretch")
-    st.caption(f"60 fréquences de {f.min():.3f} à {f.max():.3f} Hz. La moyenne du segment est retirée avant le calcul. "
-               "Les basses fréquences (< 0,03 Hz) correspondent aux tendances lentes, comme le rythme des contractions.")
 
 
 def _caracteristiques_ui(ctx):
@@ -138,9 +121,7 @@ def _anomalies_ui(ctx, comb):
     c[0].metric("Fenêtres habituelles", int((pred == 1).sum()))
     c[1].metric("Fenêtres inhabituelles", int((pred == -1).sum()))
     c[2].metric("Caractéristiques utilisées", len(colonnes))
-    st.caption(f"Avec {contamination:.0%}, ce pourcentage de fenêtres est TOUJOURS signalé, quel que soit l'enregistrement : "
-               "l'algorithme classe les fenêtres de la plus rare à la plus courante, il ne reconnaît pas de pathologie. "
-               "À présenter comme un outil de repérage statistique.")
+    st.caption(f"Repérage statistique : {contamination:.0%} des fenêtres sont signalées par construction. Ce n'est pas un diagnostic.")
     fig = go.Figure(go.Scattergl(x=ctx.t / 60, y=ctx.fhr, name="FHR", line=dict(color="#CBD5E1", width=1)))
     for _, r in res[res["Résultat"] != "Habituelle"].iterrows():
         fig.add_vrect(x0=r["Début (s)"] / 60, x1=r["Fin (s)"] / 60, fillcolor=COULEURS["fhr"], opacity=0.3, line_width=0)

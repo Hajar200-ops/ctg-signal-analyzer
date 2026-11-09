@@ -1,30 +1,11 @@
-"""PARTIE 3 — MEMBRE 3 : autocorrélation et corrélation croisée FHR / UC.
-
-Signaux et Systèmes : autocorrélation (périodicité), corrélation croisée (décalage entre deux signaux),
-normalisation, interprétation du signe et du retard.
-"""
+"""Relation FHR / UC : autocorrélation, corrélation croisée, cohérence, fonction de transfert."""
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 from plotly.subplots import make_subplots
 from scipy.signal import coherence, correlate, csd, fftconvolve, find_peaks, welch
 
-from commun import COULEURS, bandeau_partie, interpoler, layout, notions, plus_long_segment
-
-NOTIONS = r"""
-- **Autocorrélation** : $R_{xx}(\tau) = \sum_n x[n]\,x[n+\tau]$, normalisée pour valoir 1 en $\tau = 0$.
-  Un pic à $\tau_0$ signifie que le signal se « ressemble » après un décalage $\tau_0$ : c'est sa **période**.
-- **Corrélation croisée** : $R_{xy}(\tau) = \sum_n x[n]\,y[n+\tau]$ — compare deux signaux décalés.
-  Normalisée entre −1 et 1 après retrait des moyennes.
-- **Lecture ici** (x = FHR, y = UC) : un décalage **positif** signifie que le FHR réagit **après** l'UC ;
-  un coefficient **négatif** signifie que le FHR baisse quand l'UC monte.
-- **Attention** : une corrélation forte montre une relation temporelle, pas une cause.
-- **Réponse impulsionnelle** : $h(t) = \mathcal{F}^{-1}\{H(f)\}$. Si le système est linéaire et invariant, le FHR est la
-  **convolution** de l'UC avec $h$ : $y(t) = (u * h)(t)$. On vérifie le modèle en comparant la sortie prédite à la mesure ($R^2$).
-- **Système** : on voit le FHR comme la **sortie** d'un système dont l'**entrée** est l'UC. Sa fonction de transfert
-  estimée est $H(f) = P_{xy}(f)/P_{xx}(f)$ (gain $|H|$ et phase), et la **cohérence**
-  $C_{xy}(f) = |P_{xy}|^2 / (P_{xx}P_{yy})$ (entre 0 et 1) dit à quel point la relation entrée-sortie est linéaire à chaque fréquence.
-"""
+from commun import COULEURS, bandeau_partie, interpoler, layout, plus_long_segment
 
 
 def autocorrelation(x, fs):
@@ -73,11 +54,7 @@ def _auto_ui(nom, x, fs, couleur, limite_s):
 
 
 def afficher(ctx):
-    bandeau_partie(3, "Corrélations", "Membre 3",
-                   "Les contractions sont-elles périodiques ? Le rythme cardiaque réagit-il aux contractions, "
-                   "et avec quel retard ?")
-    notions("autocorrélation et corrélation croisée", NOTIONS)
-
+    bandeau_partie("🔗", "Relation entre le FHR et les contractions")
     st.subheader("Autocorrélation")
     seg = plus_long_segment(np.isfinite(ctx.fhr))
     if seg is None or seg[1] - seg[0] < 64:
@@ -88,7 +65,6 @@ def afficher(ctx):
         su = plus_long_segment(np.isfinite(ctx.uc))
         if su is not None and su[1] - su[0] >= 64:
             _auto_ui("UC", ctx.uc[su[0]:su[1]], ctx.fs, COULEURS["uc"], 1800)
-            st.caption("Le premier pic de l'autocorrélation de l'UC donne la période entre deux contractions successives.")
 
     st.subheader("Corrélation croisée FHR / UC")
     if ctx.uc is None:
@@ -120,8 +96,7 @@ def afficher(ctx):
     sens = "baisse quand l'UC augmente" if coef < 0 else "monte quand l'UC augmente"
     ordre = "après" if tau > 0 else "avant"
     _systeme_ui(ctx)
-    st.info(f"Corrélation **{force}** (coef = {coef:+.2f}) : le FHR {sens}, et il varie environ **{abs(tau):.0f} s {ordre}** l'UC. "
-            "Une relation temporelle ne prouve pas une cause, et ce résultat ne constitue pas un diagnostic.")
+    st.info(f"Corrélation **{force}** (coef = {coef:+.2f}) : le FHR {sens}, environ **{abs(tau):.0f} s {ordre}** l'UC.")
 
 
 def _systeme_ui(ctx):
@@ -175,7 +150,6 @@ def _systeme_ui(ctx):
     st.plotly_chart(layout(fig, "", 640, hover="x unified"), width="stretch")
 
     # --- réponse impulsionnelle h(t) = TF⁻¹{H(f)·Cxy(f)} et modèle par convolution : FHR ≈ moyenne + (UC * h)
-    # (H est pondérée par la cohérence : là où l'UC n'explique pas le FHR, on réduit l'influence de l'estimation)
     h = np.fft.fftshift(np.fft.irfft(H * Cxy, n=nper))
     lags_h = (np.arange(nper) - nper // 2) / ctx.fs
     u0, y0 = uc_seg - uc_seg.mean(), fhr_seg - fhr_seg.mean()
@@ -197,21 +171,14 @@ def _systeme_ui(ctx):
     fig2.update_xaxes(title_text="Temps (min)", row=2, col=1)
     fig2.update_yaxes(title_text="BPM (centré)", row=2, col=1)
     st.plotly_chart(layout(fig2, "", 560, hover="x unified"), width="stretch")
-    st.caption(f"Le modèle linéaire explique {max(r2, 0):.0%} de la variance du FHR ; le reste vient de ce que l'UC ne prédit pas "
-               "(accélérations spontanées, bruit, non-linéarités). R² est calculé sur les données qui ont servi à estimer h : "
-               "il est optimiste. Attention : quand l'UC est presque périodique, seules ses harmoniques « excitent » le système "
-               "et h est mal déterminée (ne lisez pas un retard précis sur h : utilisez la corrélation croisée pour le retard).")
+    st.caption(f"Le modèle linéaire explique {max(r2, 0):.0%} de la variance du FHR (R² calculé sur les données d'estimation).")
     forte = Cxy[k] >= 0.7
-    st.info(f"À la fréquence des contractions, la cohérence vaut **{Cxy[k]:.2f}** : "
-            + ("la relation entre UC et FHR est **fortement linéaire** à cette fréquence." if forte else
-               "la relation linéaire entre UC et FHR est **limitée** à cette fréquence (le FHR varie aussi pour d'autres raisons).")
-            + f" Une phase de {np.degrees(np.angle(H[k])):+.0f}° proche de ±180° indique que le FHR varie en **sens inverse** de l'UC. "
-              "Chaque segment contient au moins 2 périodes de contraction et au moins 5 segments sont moyennés ; "
-              "une cohérence ne prouve pas une cause.")
+    st.info(f"Cohérence UC → FHR à la fréquence des contractions : **{Cxy[k]:.2f}** "
+            f"({'relation fortement linéaire' if forte else 'relation linéaire limitée'}), phase {np.degrees(np.angle(H[k])):+.0f}°.")
 
 
 def resultats(ctx):
-    """Chiffres clés de la partie 3 (sans affichage) : utilisés par l'onglet Synthèse."""
+    """Chiffres clés (sans affichage) : utilisés par l'onglet Synthèse."""
     out = {"periode_auto_uc_s": None, "tau_s": None, "coef": None}
     if ctx.uc is None:
         return out

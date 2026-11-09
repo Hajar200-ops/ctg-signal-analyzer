@@ -1,28 +1,11 @@
-"""PARTIE 2 — MEMBRE 2 : analyse fréquentielle (FFT, bandes d'énergie, STFT).
-
-Signaux et Systèmes : transformée de Fourier discrète, fenêtre de Hann, résolution
-fréquentielle, compromis temps-fréquence.
-"""
+"""Analyse fréquentielle : FFT, bandes d'énergie, STFT, densité spectrale de puissance."""
 import numpy as np
 import plotly.graph_objects as go
 import streamlit as st
 from scipy.signal import periodogram, stft, welch
 
-from commun import COULEURS, bandeau_partie, layout, notions, plus_long_segment
+from commun import COULEURS, bandeau_partie, layout, plus_long_segment
 
-NOTIONS = r"""
-- **Transformée de Fourier discrète** : $X(f) = \sum_n x[n]\, e^{-j 2\pi f n / f_e}$ — elle décompose le signal en fréquences.
-- **Fenêtre de Hann** : on multiplie le segment par une cloche pour limiter les « fuites » spectrales.
-  On retire d'abord la moyenne (composante continue), ce n'est pas un filtre.
-- **Résolution fréquentielle** : $\Delta f = 1/T$ (T = durée du segment). Plus l'enregistrement est long, plus le spectre est précis.
-- **Période** d'une composante : $T = 1/f$. La fréquence dominante de l'UC donne le rythme des contractions
-  (une contraction toutes les 5 min correspond à $f \approx 0{,}0033$ Hz).
-- **Parseval** : l'énergie est la même dans les deux domaines, $\sum_n |x[n]|^2 = \frac{1}{N}\sum_k |X[k]|^2$.
-- **Densité spectrale de puissance (DSP)** : répartition de la puissance par Hz. Le périodogramme (une seule FFT) est
-  très bruité ; la **méthode de Welch** moyenne plusieurs segments : moins de variance, mais moins de résolution.
-- **STFT** : FFT sur des fenêtres glissantes → spectrogramme (temps × fréquence).
-  **Compromis** : fenêtre longue = bonne résolution en fréquence mais mauvaise en temps, et inversement.
-"""
 BANDES = [("Très basses (VLF) < 0,03 Hz", 0.0, 0.03), ("Basses (LF) 0,03–0,15 Hz", 0.03, 0.15),
           ("Moyennes (MF) 0,15–0,5 Hz", 0.15, 0.5), ("Hautes (HF) 0,5–1 Hz", 0.5, 1.0)]
 
@@ -47,17 +30,13 @@ def _segment(x, valide):
 
 
 def afficher(ctx):
-    bandeau_partie(2, "Analyse fréquentielle", "Membre 2",
-                   "Quelles fréquences contient le signal ? Quel est le rythme des contractions ? "
-                   "Comment ces fréquences évoluent-elles dans le temps ?")
-    notions("Fourier, fenêtrage, STFT", NOTIONS)
+    bandeau_partie("🌊", "Analyse fréquentielle")
     seg_f = _segment(ctx.fhr, np.isfinite(ctx.fhr))
     if seg_f is None or seg_f[1] - seg_f[0] < 64:
         st.warning("Segment FHR continu trop court (< 64 mesures) pour une analyse fréquentielle.")
         return
     a, b, sig = seg_f
-    st.caption(f"Segment FHR continu le plus long : {(b - a) / ctx.fs:.0f} s "
-               f"(de {ctx.t[a] / 60:.1f} à {ctx.t[b - 1] / 60:.1f} min) — aucune donnée n'est inventée.")
+    st.caption(f"Segment FHR analysé : {(b - a) / ctx.fs:.0f} s (de {ctx.t[a] / 60:.1f} à {ctx.t[b - 1] / 60:.1f} min).")
 
     st.subheader("FFT du FHR")
     zones = {"0 – 0,1 Hz (lent : contractions, tendances)": 0.1, "0 – 0,5 Hz": 0.5, "Tout (0 – fe/2)": ctx.fs / 2}
@@ -82,7 +61,6 @@ def afficher(ctx):
     st.markdown("**Répartition de l'énergie par bande de fréquences**")
     lignes = {nom: f"{100 * energie[(fr >= lo) & (fr < hi)].sum() / tot:.1f} %" for nom, lo, hi in BANDES}
     st.dataframe({"Bande": list(lignes), "Part de l'énergie": list(lignes.values())}, width="stretch", hide_index=True)
-    st.caption("Bandes usuelles en variabilité du rythme cardiaque fœtal : à confirmer dans votre référence de cours.")
 
     st.subheader("FFT de l'UC : rythme des contractions")
     if ctx.uc is None:
@@ -117,21 +95,13 @@ def afficher(ctx):
     fig.update_yaxes(title_text="Fréquence (Hz)", range=[0, 0.5])
     fig.update_xaxes(title_text="Temps (min)")
     st.plotly_chart(layout(fig, "Spectrogramme (STFT)", 420, hover="closest"), width="stretch")
-    st.caption("Essayez 64 puis 512 : la fenêtre courte localise mieux dans le temps, la longue sépare mieux les fréquences.")
-    _parseval_welch_ui(ctx, sig)
+    _dsp_ui(ctx, sig)
 
 
-def _parseval_welch_ui(ctx, sig):
-    st.subheader("Théorème de Parseval et densité spectrale de puissance")
+def _dsp_ui(ctx, sig):
+    st.subheader("Densité spectrale de puissance")
     x = sig - sig.mean()
     N = len(x)
-    E_t = float(np.sum(x ** 2))
-    E_f = float(np.sum(np.abs(np.fft.fft(x)) ** 2) / N)
-    c = st.columns(3)
-    c[0].metric("Énergie dans le temps  Σ|x|²", f"{E_t:,.0f}".replace(",", " "))
-    c[1].metric("Énergie en fréquence  (1/N)Σ|X|²", f"{E_f:,.0f}".replace(",", " "))
-    c[2].metric("Écart relatif", f"{abs(E_t - E_f) / E_t:.1e}")
-    st.caption("Parseval vérifié numériquement : la FFT ne perd ni ne crée d'énergie, elle la redistribue entre les fréquences.")
     options = [n for n in (256, 512, 1024, 2048, 4096) if n <= N // 2]
     if not options:
         st.info("Segment trop court pour la méthode de Welch.")
@@ -141,17 +111,15 @@ def _parseval_welch_ui(ctx, sig):
     fw, Pw = welch(x, fs=ctx.fs, window="hann", nperseg=nper, noverlap=nper // 2, detrend="constant")
     fp, Pp = periodogram(x, fs=ctx.fs, window="hann", detrend="constant")
     fig = go.Figure()
-    fig.add_trace(go.Scatter(x=fp, y=Pp, name="Périodogramme (1 FFT)", line=dict(color="#CBD5E1")))
-    fig.add_trace(go.Scatter(x=fw, y=Pw, name=f"Welch ({nper} éch., 50 % de recouvrement)", line=dict(color=COULEURS["fhr"], width=2)))
+    fig.add_trace(go.Scatter(x=fp, y=Pp, name="Périodogramme", line=dict(color="#CBD5E1")))
+    fig.add_trace(go.Scatter(x=fw, y=Pw, name=f"Welch ({nper} éch.)", line=dict(color=COULEURS["fhr"], width=2)))
     fig.update_xaxes(title_text="Fréquence (Hz)", range=[0, 0.5])
     fig.update_yaxes(title_text="DSP (BPM²/Hz)", type="log")
     st.plotly_chart(layout(fig, "Densité spectrale de puissance du FHR", 360, hover="closest"), width="stretch")
-    st.caption(f"Résolution de Welch : {ctx.fs / nper:.4f} Hz (périodogramme : {ctx.fs / N:.5f} Hz). "
-               "Compromis : plus de segments = courbe plus lisse, mais pics moins fins.")
 
 
 def resultats(ctx):
-    """Chiffres clés de la partie 2 (sans affichage) : utilisés par l'onglet Synthèse."""
+    """Chiffres clés (sans affichage) : utilisés par l'onglet Synthèse."""
     out = {"f_dom_fhr": None, "f_dom_uc": None}
     seg = _segment(ctx.fhr, np.isfinite(ctx.fhr))
     if seg is not None and seg[1] - seg[0] >= 64:

@@ -1,4 +1,4 @@
-"""Tests du projet — un bloc par membre. Lancer :  pip install pytest   puis   pytest -v
+"""Tests du projet. Lancer :  pip install pytest   puis   pytest -v
 
 Chaque test utilise un signal dont on connaît la réponse à l'avance : si le test passe,
 la partie correspondante calcule bien ce qu'elle prétend calculer.
@@ -18,8 +18,29 @@ import partie4_tempsfreq_ml as P4
 FS = 4.0
 
 
+def _generer_signal_test(duree_min=30, seed=0, retard_dec_s=20.0, fs=FS):
+    """Signal CTG de TEST (réponses connues) : contractions toutes les 4,5 min, décélérations retardées, pertes de signal."""
+    rng = np.random.default_rng(seed)
+    t = np.arange(0, duree_min * 60, 1 / fs)
+    tm = t / 60
+    g = lambda c, s: np.exp(-0.5 * ((tm - c) / s) ** 2)
+    contr = np.arange(4.0, duree_min - 2, 4.5)
+    uc = 10 + sum(rng.uniform(60, 85) * g(c, 0.5) for c in contr) + rng.normal(0, 1.5, len(t))
+    fhr = 140 + sum(20 * g(c + 2.25, 0.25) for c in contr[:-1]) \
+        - sum(rng.uniform(22, 35) * g(c + retard_dec_s / 60, 0.38) for c in contr)
+    bruit, e = np.zeros(len(t)), rng.normal(0, 0.9, len(t))
+    for i in range(1, len(t)):
+        bruit[i] = 0.9 * bruit[i - 1] + e[i]
+    fhr = fhr + bruit
+    for debut_min, long_s in ((6.3, 18), (14.1, 35), (22.7, 12)):
+        if debut_min < duree_min - 1:
+            i = int(debut_min * 60 * fs)
+            fhr[i:i + int(long_s * fs)] = 0
+    return pd.DataFrame({"Time": t.round(2), "FHR": fhr.round(1), "UC": uc.round(1)})
+
+
 def _ctx(duree_min=40, **kw):
-    df = C.generer_signal_demo(duree_min=duree_min, **kw)
+    df = _generer_signal_test(duree_min=duree_min, **kw)
     return C.construire_contexte(df, "Time", "FHR", "UC", "test")
 
 
@@ -29,22 +50,22 @@ class Fichier(io.BytesIO):                      # imite un fichier déposé dans
         self.name = nom
 
 
-# =========================================================== MEMBRE 1 : import, détection, indicateurs
+# =========================================================== IMPORT, DÉTECTION, INDICATEURS
 def test_m1_csv_standard():
-    df = C.generer_signal_demo(duree_min=10)
+    df = _generer_signal_test(duree_min=10)
     d, nom = C.lire_fichiers(Fichier(df.to_csv(index=False).encode(), "a.csv"))
     assert C.deviner_colonnes(d) == ("Time", "FHR", "UC")
 
 
 def test_m1_point_virgule_et_virgule_decimale():
-    df = C.generer_signal_demo(duree_min=10)
+    df = _generer_signal_test(duree_min=10)
     d, _ = C.lire_fichiers(Fichier(df.to_csv(index=False, sep=";", decimal=",").encode(), "b.csv"))
     ctx = C.construire_contexte(d, *C.deviner_colonnes(d), "b")
     assert abs(ctx.fs - FS) < 0.1 and np.nanmedian(ctx.fhr) > 100
 
 
 def test_m1_colonnes_sans_en_tete_ni_noms():
-    df = C.generer_signal_demo(duree_min=10)
+    df = _generer_signal_test(duree_min=10)
     contenu = df[["UC", "Time", "FHR"]].to_csv(index=False, header=False).encode()   # ordre mélangé
     d, _ = C.lire_fichiers(Fichier(contenu, "c.csv"))
     t, f, u = C.deviner_colonnes(d)
@@ -52,7 +73,7 @@ def test_m1_colonnes_sans_en_tete_ni_noms():
 
 
 def test_m1_temps_en_minutes_et_en_ms():
-    df = C.generer_signal_demo(duree_min=10)
+    df = _generer_signal_test(duree_min=10)
     for facteur, nom in ((1 / 60, "min"), (1000, "ms")):
         d = pd.DataFrame({"t": df["Time"] * facteur, "fhr": df["FHR"], "uc": df["UC"]})
         ctx = C.construire_contexte(d, "t", "fhr", "uc", nom)
@@ -78,7 +99,7 @@ def test_m1_detection_evenements():
     base, _, acc, dec, contr = P1.detecter(ctx, prm)
     assert 135 <= base <= 145
     assert len(contr) == 8 and len(dec) >= 6
-    assert all(10 <= e["decalage"] <= 30 for e in dec if e["decalage"] is not None)   # simulé avec 20 s de retard
+    assert all(10 <= e["decalage"] <= 30 for e in dec if e["decalage"] is not None)
 
 
 def test_m1_indicateurs_signalent_decelerations_retardees():
@@ -87,15 +108,7 @@ def test_m1_indicateurs_signalent_decelerations_retardees():
     assert "retardées après" in ligne[3]
 
 
-def test_m1_repliement_spectral():
-    """Aliasing : un sinus de 0,8 Hz sous-échantillonné à 0,25 Hz (M = 16, SANS filtre) apparaît à 0,05 Hz."""
-    t = np.arange(0, 4000, 1 / FS)
-    x = np.sin(2 * np.pi * 0.8 * t)
-    f, p = P1._psd(x[::16], FS / 16)
-    assert f[np.argmax(p)] == pytest.approx(0.05, abs=0.005)           # 0,8 − 3×0,25 = 0,05 Hz
-
-
-# =========================================================== MEMBRE 2 : FFT, Parseval, Welch, STFT
+# =========================================================== FRÉQUENCES
 def test_m2_fft_frequence_sinus():
     t = np.arange(0, 1200, 1 / FS)
     f, a = P2.spectre(140 + 10 * np.sin(2 * np.pi * 0.01 * t), FS)
@@ -109,17 +122,12 @@ def test_m2_amplitude_du_spectre():
     assert a.max() == pytest.approx(10, rel=0.1)
 
 
-def test_m2_parseval():
-    x = np.random.default_rng(0).normal(size=2048)
-    assert np.sum(x ** 2) == pytest.approx(np.sum(np.abs(np.fft.fft(x)) ** 2) / len(x), rel=1e-10)
-
-
 def test_m2_periode_des_contractions():
     res = P2.resultats(_ctx(40))
     assert 1 / res["f_dom_uc"] / 60 == pytest.approx(4.5, abs=0.5)      # une contraction toutes les 4,5 min
 
 
-# =========================================================== MEMBRE 3 : autocorrélation, corrélation croisée
+# =========================================================== CORRÉLATIONS
 def test_m3_autocorrelation_periode():
     t = np.arange(0, 3000, 1 / FS)
     _, _, per = P3.autocorrelation(np.sin(2 * np.pi * t / 300), FS)
@@ -145,7 +153,7 @@ def test_m3_resultats_coherents():
     assert res["coef"] < -0.5 and 5 < res["tau_s"] < 40
 
 
-# =========================================================== MEMBRE 4 : fenêtres, ondelettes, anomalies
+# =========================================================== FENÊTRES, ONDELETTES
 def test_m4_fenetres_nombre_et_disponibilite():
     ctx = _ctx(10)
     df = P4.fenetres(ctx.t, ctx.uc, FS, 30, lambda w: np.isfinite(w) & (w >= 0), "UC")

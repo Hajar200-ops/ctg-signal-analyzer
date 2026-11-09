@@ -1,8 +1,4 @@
-"""OUTILS PARTAGÉS : lecture de n'importe quel fichier, contexte de données, thème visuel.
-
-Ici il n'y a AUCUN traitement du signal : tout le Signaux et Systèmes est dans les 4 parties.
-Chaque partie reçoit le même objet `Contexte` et affiche ses propres résultats.
-"""
+"""Outils partagés : lecture de n'importe quel fichier, contexte de données, thème visuel."""
 import os
 import re
 import tempfile
@@ -72,7 +68,8 @@ def construire_contexte(df, col_temps, col_fhr, col_uc, nom="enregistrement",
         unite = unite_temps
         if unite == "auto":                       # on devine d'après le pas : 4 Hz = 0,25 s = 250 ms = 0,0042 min
             unite = "ms" if dt_med >= 20 else ("min" if dt_med < 0.02 else "s")
-            av.append(f"Unité du temps devinée : {unite} (modifiable dans la barre latérale).")
+            if unite != "s":
+                av.append(f"Unité du temps devinée : {unite} (modifiable dans la barre latérale).")
         t = t * {"s": 1.0, "min": 60.0, "ms": 1e-3}[unite]
         dt_med = float(np.median(np.diff(t)))
         fs = 1.0 / dt_med
@@ -242,28 +239,6 @@ def interpoler(x):
         x[mauvais] = np.interp(np.flatnonzero(mauvais), np.flatnonzero(~mauvais), x[~mauvais])
     return x
 
-
-def generer_signal_demo(duree_min=30, seed=0, retard_dec_s=20.0, fs=FS_DEFAUT):
-    """Enregistrement SIMULÉ (pour tester sans fichier) : contractions, décélérations retardées, interruptions."""
-    rng = np.random.default_rng(seed)
-    t = np.arange(0, duree_min * 60, 1 / fs)
-    tm = t / 60
-    g = lambda c, s: np.exp(-0.5 * ((tm - c) / s) ** 2)
-    contr = np.arange(4.0, duree_min - 2, 4.5)
-    uc = 10 + sum(rng.uniform(60, 85) * g(c, 0.5) for c in contr) + rng.normal(0, 1.5, len(t))
-    fhr = 140 + sum(20 * g(c + 2.25, 0.25) for c in contr[:-1]) \
-        - sum(rng.uniform(22, 35) * g(c + retard_dec_s / 60, 0.38) for c in contr)
-    bruit, e = np.zeros(len(t)), rng.normal(0, 0.9, len(t))
-    for i in range(1, len(t)):
-        bruit[i] = 0.9 * bruit[i - 1] + e[i]
-    fhr = fhr + bruit
-    for debut_min, long_s in ((6.3, 18), (14.1, 35), (22.7, 12)):      # pertes de signal (FHR = 0)
-        if debut_min < duree_min - 1:
-            i = int(debut_min * 60 * fs)
-            fhr[i:i + int(long_s * fs)] = 0
-    return pd.DataFrame({"Time": t.round(2), "FHR": fhr.round(1), "UC": uc.round(1)})
-
-
 # ----------------------------------------------------------------------------
 # Thème visuel « bébé » : pastel, bébé qui dort, cœur qui bat, tracé ECG
 # ----------------------------------------------------------------------------
@@ -296,7 +271,7 @@ section[data-testid="stSidebar"] {background: linear-gradient(180deg, #FFEDF3 0%
            stroke-dasharray: 1800; stroke-dashoffset: 1800; animation: tracer 6s linear infinite;}
 @keyframes tracer {to {stroke-dashoffset: 0;}}
 
-.partie {background: #fff; border-left: 8px solid #F9A8D4; border-radius: 20px; padding: 14px 22px; margin: 4px 0 14px 0;
+.partie {background: #fff; border-left: 8px solid #F9A8D4; border-radius: 20px; padding: 6px 22px; margin: 4px 0 14px 0;
          box-shadow: 0 2px 12px rgba(74,44,90,.08);}
 .partie h2 {margin: 6px 0 2px 0; padding: 0; font-size: 1.45rem; font-weight: 800; color: #4A2C5A;}
 .partie p {margin: 0; color: #6B5B7B;}
@@ -339,29 +314,58 @@ def appliquer_theme():
 
 
 def entete(titre, sous_titre):
-    chips = '<div class="chips"><span>💗 110–160 battements/min</span><span>⏱ 4 mesures par seconde</span><span>📈 Signaux et Systèmes</span></div>'
+    chips = '<div class="chips"><span>💗 FHR · rythme cardiaque fœtal</span><span>🤰 UC · contractions utérines</span></div>'
     st.markdown(f'<div class="hero"><div class="hero-text"><h1>{titre}</h1><p>{sous_titre}</p>{chips}</div>{_BEBE}{_ECG}</div>',
                 unsafe_allow_html=True)
 
 
-def bandeau_partie(numero, titre, membre, resume):
-    icone = {1: "🍼", 2: "🌊", 3: "🔗", 4: "🧸"}.get(numero, "🌟")
-    badge = f"PARTIE {numero} · {membre}" if isinstance(numero, int) else membre
-    st.markdown(f'<div class="partie"><span class="badge">{icone} {badge}</span>'
-                f'<h2>{titre}</h2><p>{resume}</p></div>', unsafe_allow_html=True)
-
-
-def notions(titre, texte):
-    with st.expander(f"📘 Notions de Signaux et Systèmes — {titre}"):
-        st.markdown(texte)
+def bandeau_partie(icone, titre):
+    st.markdown(f'<div class="partie"><h2>{icone} {titre}</h2></div>', unsafe_allow_html=True)
 
 
 def layout(fig, titre="", hauteur=420, hover="x unified"):
-    fig.update_layout(template="plotly_white", title=dict(text=titre, x=0.01, font=dict(size=16, color="#4A2C5A")),
-                      height=hauteur, margin=dict(l=10, r=10, t=55 if titre else 30, b=10),
-                      legend=dict(orientation="h", y=1.1, x=0), hovermode=hover,
-                      paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(255,255,255,.75)",
-                      font=dict(family="Nunito, Segoe UI, sans-serif", color="#4A2C5A"))
+    fig.update_layout(
+        template="plotly_white",
+
+        title=dict(
+            text=titre,
+            x=0.01,
+            y=0.98,
+            xanchor="left",
+            yanchor="top",
+            font=dict(size=16, color="#4A2C5A")
+        ),
+
+        height=hauteur,
+
+        # Espace réservé autour du graphique
+        margin=dict(
+            l=10,
+            r=10,
+            t=85 if titre else 30,
+            b=85
+        ),
+
+        # Légende déplacée sous le graphique
+        legend=dict(
+            orientation="h",
+            yanchor="top",
+            y=-0.20,
+            xanchor="center",
+            x=0.5
+        ),
+
+        hovermode=hover,
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(255,255,255,.75)",
+        font=dict(
+            family="Nunito, Segoe UI, sans-serif",
+            color="#4A2C5A"
+        )
+    )
+
     fig.update_xaxes(gridcolor="#F1E4EC")
     fig.update_yaxes(gridcolor="#F1E4EC")
+
     return fig
+

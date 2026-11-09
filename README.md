@@ -9,7 +9,7 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Tests (un bloc par membre)
+## Tests
 ```
 pip install pytest
 pytest -v
@@ -33,10 +33,10 @@ git push -u origin main
 ## Fichiers
 | Fichier | Rôle |
 |---|---|
-| `app.py` | dépôt de n'importe quel fichier, colonnes, onglets, synthèse |
+| `app.py` | dépôt du fichier, choix des colonnes, onglets, synthèse |
 | `commun.py` | lecture CSV / TXT / Excel / PhysioNet (.hea + .dat), contexte de données, thème |
-| `partie1_acquisition.py` | qualité, interruptions, échantillonnage/repliement, événements, indicateurs usuels |
-| `partie2_frequentiel.py` | FFT, Parseval, DSP (Welch), STFT |
+| `partie1_acquisition.py` | qualité, interruptions, événements, indicateurs usuels |
+| `partie2_frequentiel.py` | FFT, DSP (Welch), STFT |
 | `partie3_correlations.py` | autocorrélation, corrélation croisée, cohérence, fonction de transfert, réponse impulsionnelle |
 | `partie4_tempsfreq_ml.py` | ondelettes, caractéristiques par fenêtres, Isolation Forest |
 | `test_projet.py` | tests par membre |

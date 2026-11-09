@@ -1,8 +1,4 @@
-"""PARTIE 1 — MEMBRE 1 : acquisition, qualité des données, interruptions, détection d'événements.
-
-Signaux et Systèmes : signal discret, échantillonnage (Shannon), ligne de base,
-détection de pics/creux, largeur à mi-hauteur.
-"""
+"""Signal et événements : informations, qualité, interruptions, détection d'événements, indicateurs usuels."""
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -10,23 +6,11 @@ import streamlit as st
 from plotly.subplots import make_subplots
 from scipy.signal import find_peaks
 
-from commun import COULEURS, bandeau_partie, interpoler, layout, notions, plus_long_segment
-
-NOTIONS = r"""
-- **Signal discret** : le CTG est une suite de mesures $x[n] = x(n\,T_e)$ avec $T_e = 1/f_e$ (ici $f_e \approx 4$ Hz).
-- **Théorème de Shannon** : seules les fréquences $< f_e/2$ sont représentées correctement (fréquence de Nyquist).
-- **Interruptions** : un FHR égal à 0 signifie « signal perdu », pas un rythme nul.
-- **Ligne de base** : médiane du FHR (peu sensible au bruit, donc pas besoin de filtrer).
-- **Événement** : un pic (accélération) ou un creux (décélération) d'au moins un seuil en BPM par rapport à la
-  ligne de base, d'une durée minimale **mesurée à mi-hauteur**.
-- **Fréquence des contractions** : nombre de contractions détectées par 10 minutes.
-- **Indicateurs usuels** : ligne de base, variabilité, accélérations, décélérations et contractions sont les grandeurs
-  que les cliniciens regardent sur un CTG. On les MESURE ici par traitement du signal, puis on les compare à des repères usuels.
-"""
+from commun import COULEURS, bandeau_partie, interpoler, layout
 
 
 # ---------------------------------------------------------------------------
-# Détection d'événements (cœur « Signaux et Systèmes » de cette partie)
+# Détection d'événements
 # ---------------------------------------------------------------------------
 def _franchissement(x, p, niveau, sens, k):
     """Indice où x passe sous `niveau` (k échantillons consécutifs) en partant du sommet p."""
@@ -97,16 +81,12 @@ def detecter(ctx, prm):
 # Affichage
 # ---------------------------------------------------------------------------
 def afficher(ctx):
-    bandeau_partie(1, "Acquisition, qualité et événements", "Membre 1",
-                   "Lire le signal, vérifier sa qualité, repérer les interruptions, détecter accélérations, "
-                   "décélérations et contractions.")
-    notions("acquisition et détection", NOTIONS)
+    bandeau_partie("🍼", "Signal et événements")
     _informations(ctx)
     _statistiques(ctx)
     _visualisation(ctx)
     _qualite(ctx)
     _interruptions(ctx)
-    _echantillonnage_ui(ctx)
     res = _evenements_ui(ctx)
     if res:
         _indicateurs_ui(ctx, *res)
@@ -160,7 +140,6 @@ def _visualisation(ctx):
     if deux:
         fig.update_yaxes(title_text="UA", row=2, col=1)
     st.plotly_chart(layout(fig, hauteur=560 if deux else 340), width="stretch")
-    st.caption("Les interruptions (FHR = 0) apparaissent comme des trous. Zoom : glisser sur la courbe, double-clic pour réinitialiser.")
 
 
 def _qualite(ctx):
@@ -173,7 +152,7 @@ def _qualite(ctx):
     c[1].metric("FHR = 0", int((brut == 0).sum()))
     c[2].metric("FHR manquants", int(np.isnan(brut).sum()))
     c[3].metric("Statistiquement inhabituels", int(_iqr_aberrantes(ctx.fhr)[0].sum()))
-    st.caption(f"Limites IQR : {bas:.0f} à {haut:.0f} BPM. Ce sont des valeurs à vérifier, pas un diagnostic.")
+    st.caption(f"Valeurs hors de l'intervalle {bas:.0f} – {haut:.0f} BPM (méthode IQR).")
     if ctx.uc is None:
         st.info("Pas de signal UC : contrôle de qualité UC indisponible.")
         return
@@ -211,7 +190,7 @@ def _interruptions(ctx):
 
 def _evenements_ui(ctx):
     st.subheader("Détection des accélérations, décélérations et contractions")
-    with st.expander("Seuils de détection (à régler selon la qualité du signal)"):
+    with st.expander("Seuils de détection"):
         c = st.columns(3)
         prm = {
             "seuil": c[0].slider("Seuil FHR (BPM au-dessus/dessous de la base)", 5.0, 40.0, 15.0, 1.0, key="p1_seuil"),
@@ -261,8 +240,6 @@ def _evenements_ui(ctx):
                                      name="Contraction", marker=dict(symbol="triangle-down", size=10, color="black")), 2, 1)
     fig.update_xaxes(title_text="Temps (min)", row=2 if deux else 1, col=1)
     st.plotly_chart(layout(fig, "Courbes annotées : vert = accélération, orange = décélération", 560 if deux else 340), width="stretch")
-    st.caption("Durées mesurées à mi-hauteur (plus courtes que la durée clinique début-fin). "
-               "Signal non filtré : adaptez les seuils si trop ou pas assez d'événements apparaissent.")
     return base, acc, dec, contr
 
 
@@ -277,7 +254,7 @@ def detect_cached(ctx, prm):
 
 
 # ---------------------------------------------------------------------------
-# Indicateurs usuels d'un CTG, MESURÉS par traitement du signal puis comparés à des repères
+# Indicateurs usuels d'un CTG, mesurés par traitement du signal puis comparés à des repères
 # ---------------------------------------------------------------------------
 def _variabilite(ctx, acc, dec):
     """Variabilité = amplitude pic-à-pic du FHR sur 1 min, hors accélérations/décélérations (médiane des fenêtres)."""
@@ -295,16 +272,16 @@ def _variabilite(ctx, acc, dec):
 
 
 def indicateurs(ctx, base, acc, dec, contr):
-    """Retourne une liste de lignes (Indicateur, Mesure, Repère, Position). Repères : FIGO 2015 (à confirmer dans votre cours)."""
+    """Retourne une liste de lignes (Indicateur, Mesure, Repère, Position). Repères : FIGO 2015."""
     lignes = []
-    ok = lambda b: "✅ dans le repère" if b else "⚠️ hors repère"
+    ok = lambda b: " dans le repère" if b else " hors repère"
     lignes.append(("Ligne de base du FHR", f"{base:.0f} BPM", "110 – 160 BPM", ok(110 <= base <= 160)))
     var, n = _variabilite(ctx, acc, dec)
     lignes.append(("Variabilité (amplitude pic-à-pic, 1 min)", "non évaluable" if var is None else f"{var:.1f} BPM",
                    "5 – 25 BPM", "➖ non évaluable" if var is None else ok(5 <= var <= 25)))
     duree_min = ctx.duree_s / 60
     lignes.append(("Accélérations", f"{len(acc)} en {duree_min:.0f} min", "présentes = rassurant (non obligatoire)",
-                   "✅ présentes" if acc else "➖ absentes"))
+                   " présentes" if acc else "➖ absentes"))
     if ctx.uc is None:
         lignes.append(("Décélérations", f"{len(dec)}", "pas de décélérations tardives répétitives", "➖ UC absente : timing non évaluable"))
         return lignes
@@ -314,7 +291,7 @@ def indicateurs(ctx, base, acc, dec, contr):
     repetitives = len(contr) >= 3 and part > 0.5
     lignes.append(("Décélérations", f"{len(dec)} dont {len(tardives)} retardées (≥ 10 s après la contraction)",
                    "pas de décélérations tardives répétitives (> 50 % des contractions)",
-                   (f"⚠️ retardées après {100 * part:.0f} % des contractions" if repetitives else "✅ pas de répétition")
+                   (f" retardées après {100 * part:.0f} % des contractions" if repetitives else " pas de répétition")
                    if contr else "➖ non évaluable"))
     freq = len(contr) * 600 / ctx.duree_s
     lignes.append(("Fréquence des contractions", f"{freq:.1f} / 10 min", "≤ 5 / 10 min", ok(freq <= 5)))
@@ -326,57 +303,15 @@ def _indicateurs_ui(ctx, base, acc, dec, contr):
     lignes = indicateurs(ctx, base, acc, dec, contr)
     st.dataframe(pd.DataFrame(lignes, columns=["Indicateur", "Mesure", "Repère usuel", "Position"]),
                  width="stretch", hide_index=True)
-    st.caption("Repères inspirés des recommandations FIGO 2015 (CTG pendant le travail). Les enregistrements de la base CTU-UHB "
-               "sont des CTG de travail ; pendant la grossesse, d'autres critères existent (test de réactivité). "
-               "Ce tableau compare des MESURES à des repères : il ne classe pas le tracé et ne dit pas si le bébé va bien. "
-               "L'interprétation revient à un professionnel de santé.")
-
-
-# ---------------------------------------------------------------------------
-# Échantillonnage et repliement spectral (théorème de Shannon)
-# ---------------------------------------------------------------------------
-def _psd(x, fs):
-    """Périodogramme (densité spectrale de puissance) : |X(f)|² / (N·fe)."""
-    X = np.fft.rfft(x - x.mean())
-    return np.fft.rfftfreq(len(x), 1 / fs), np.abs(X) ** 2 / (len(x) * fs)
-
-
-def _echantillonnage_ui(ctx):
-    st.subheader("Échantillonnage et repliement spectral (Shannon)")
-    seg = plus_long_segment(np.isfinite(ctx.fhr))
-    if seg is None or seg[1] - seg[0] < 512:
-        st.info("Segment FHR continu trop court pour cette démonstration.")
-        return
-    x = ctx.fhr[seg[0]:seg[1]]
-    M = st.select_slider("Facteur de sous-échantillonnage M : on garde 1 mesure sur M, SANS filtre",
-                         options=[1, 2, 4, 8, 16, 32], value=8, key="p1_M")
-    f0, P0 = _psd(x, ctx.fs)
-    fs_d = ctx.fs / M
-    f1, P1 = _psd(x[::M], fs_d)
-    nyq = fs_d / 2
-    replie = 100 * P0[f0 > nyq].sum() / P0.sum() if M > 1 else 0.0
-    c = st.columns(3)
-    c[0].metric("Nouvelle fréquence fe/M", f"{fs_d:.3f} Hz")
-    c[1].metric("Nouveau Nyquist", f"{nyq:.3f} Hz")
-    c[2].metric("Énergie au-delà de Nyquist (se replie)", f"{replie:.1f} %")
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=f0, y=P0, name=f"fe = {ctx.fs:.2f} Hz (original)", line=dict(color=COULEURS["gris"])))
-    fig.add_trace(go.Scatter(x=f1, y=P1, name=f"fe = {fs_d:.3f} Hz (sous-échantillonné)", line=dict(color=COULEURS["fhr"])))
-    fig.add_vline(x=nyq, line_dash="dot", line_color="black", annotation_text="Nyquist")
-    fig.update_xaxes(title_text="Fréquence (Hz)", range=[0, ctx.fs / 2])
-    fig.update_yaxes(title_text="Densité spectrale de puissance", type="log")
-    st.plotly_chart(layout(fig, "Spectre avant / après sous-échantillonnage", 360, hover="closest"), width="stretch")
-    st.caption("Quand M augmente, l'énergie située au-delà de la nouvelle fréquence de Nyquist ne disparaît pas : "
-               "elle se REPLIE dans la bande utile (la courbe rouge dépasse la grise). C'est l'aliasing : "
-               "il faut échantillonner à fe > 2·fmax.")
 
 
 def resultats(ctx):
-    """Chiffres clés de la partie 1 (sans affichage) : utilisés par l'onglet Synthèse."""
+    """Chiffres clés (sans affichage) : utilisés par l'onglet Synthèse."""
     prm = {"seuil": 15.0, "duree_min": 10.0, "dist_fhr_s": 20.0, "seuil_uc": 0.3, "dist_uc_s": 90.0,
            "duree_min_uc": 30.0, "gap_max_s": 15.0, "fenetre_assoc_s": 120.0}
     base, _, acc, dec, contr = detect_cached(ctx, prm)
     ints = [b["t"] - a["t"] for a, b in zip(contr, contr[1:])]
-    return {"indicateurs": indicateurs(ctx, base, acc, dec, contr), "disponibilite": 100 * float(np.isfinite(ctx.fhr).mean()), "baseline": base, "n_acc": len(acc), "n_dec": len(dec),
-            "n_contr": len(contr), "periode_contr_s": float(np.mean(ints)) if ints else None,
+    return {"indicateurs": indicateurs(ctx, base, acc, dec, contr), "disponibilite": 100 * float(np.isfinite(ctx.fhr).mean()),
+            "baseline": base, "n_acc": len(acc), "n_dec": len(dec), "n_contr": len(contr),
+            "periode_contr_s": float(np.mean(ints)) if ints else None,
             "decalages_dec": [e["decalage"] for e in dec if e["decalage"] is not None]}
